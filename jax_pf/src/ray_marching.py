@@ -63,20 +63,13 @@ def xy_2_rc(
     x_rot = x_trans * orig_c + y_trans * orig_s
     y_rot = -x_trans * orig_s + y_trans * orig_c
 
-    # clip the state to be a cell
-    if (
-        x_rot < 0
-        or x_rot >= width * resolution
-        or y_rot < 0
-        or y_rot >= height * resolution
-    ):
-        c = -1
-        r = -1
-    else:
-        c = int(x_rot / resolution)
-        r = int(y_rot / resolution)
+    # clip the state to be a cell:
+    r = jnp.clip(y_rot / resolution, min=0, max=height)
+    c = jnp.clip(x_rot / resolution, min=0, max=width)
+    
+    rc = jnp.array([r, c], dtype=int)
 
-    return jnp.array([r, c])
+    return rc
 
 
 @jax.jit
@@ -128,7 +121,7 @@ def distance_transform(
     return distance
 
 
-@partial(jax.jit, static_argnums=[3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14])
+@partial(jax.jit, static_argnums=[5, 14])
 @chex.assert_max_traces(n=2)
 def trace_ray(
     x: float,
@@ -197,34 +190,31 @@ def trace_ray(
     )
     total_dist = dist_to_nearest
 
-    init_dist = (dist_to_nearest, total_dist)
+    init_dist = jnp.array([dist_to_nearest, total_dist, x, y])
 
     def trace_step(dists):
-        x += dists[0] * c
-        y += dists[0] * s
+        x = (dists[2] + dists[0] * c)[0]
+        y = (dists[3] + dists[0] * s)[0]
 
         # update dist_to_nearest for current point on ray
         # also keeps track of total ray length
         dist_to_nearest = distance_transform(
             x, y, orig_x, orig_y, orig_c, orig_s, height, width, resolution, dt
         )
-        total_dist += dist_to_nearest
-        return total_dist
+        total_dist = dists[1] + dist_to_nearest
+        return jnp.array([dist_to_nearest, total_dist, x, y])
 
     def trace_cond(dists):
-        return dists[0] > eps and dists[1] <= max_range
+        return (dists[0] > eps) & (dists[1] <= max_range)
 
     # ray tracing iterations
-    total_dist = jax.lax.while_loop(trace_cond, trace_step, init_dist)
-
-    jnp.clip(total_dist, max=max_range)
+    final_dist = jax.lax.while_loop(trace_cond, trace_step, init_dist)
+    total_dist = jnp.clip(final_dist[1], max=max_range)
 
     return total_dist
 
 
-@partial(
-    jax.jit, static_argnums=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
-)
+@partial(jax.jit, static_argnums=[3])
 @chex.assert_max_traces(n=2)
 def get_scan(
     pose: ArrayLike,
@@ -290,12 +280,13 @@ def get_scan(
         resulting laser scan at the pose, with length num_beams
     """
     # make theta discrete by mapping the range [-pi, pi] onto [0, theta_dis]
-    theta_index = theta_dis * (pose[2] - fov / 2.0) / (2.0 * np.pi)
+    theta_index = theta_dis * (pose[2] - fov / 2.0) / (2.0 * jnp.pi)
 
     # make sure it's wrapped properly
     theta_index = jnp.fmod(theta_index, theta_dis)
-    if theta_index < 0:
-        theta_index += theta_dis
+    inc = lambda x: x + theta_dis
+    noinc = lambda x: x
+    theta_index = jax.lax.cond((theta_index < 0), inc, noinc, theta_index)
 
     theta_indices = jnp.linspace(
         start=theta_index,

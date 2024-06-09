@@ -1,18 +1,13 @@
 
 [project]
 name = "jax_pf"
-authors = [{name = "Hongrui Zheng", email = "hongruiz@seas.upenn.edu"}]
+authors = [{ name = "Hongrui Zheng", email = "hongruiz@seas.upenn.edu" }]
 version = "0.1.0"
 requires-python = ">=3.10"
-dependencies = [
-  "jax[cuda12]",
-  "chex",
-  "distrax",
-  "scipy",
-]
+dependencies = ["jax[cuda12]", "chex", "distrax", "scipy"]
 
 [project.optional-dependencies]
-test = ["pytest"]
+test = ["pytest", "requests", "Pillow", "pyyaml"]
 
 [build-system]
 requires = ["setuptools >= 61.0"]
