@@ -14,6 +14,8 @@ from .ray_marching import get_scan
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 
 
+@partial(jax.jit, static_argnums=[5])
+@chex.assert_max_traces(n=2)
 def compute_sensor_model(
     z_short: float,
     z_max: float,
@@ -38,7 +40,7 @@ def compute_sensor_model(
     sigma_hit : float
         _description_
     max_range_px : int
-        _description_
+        maximum scan range in pixels
 
     Returns
     -------
@@ -47,44 +49,62 @@ def compute_sensor_model(
     """
     sensor_model_table = jnp.zeros((max_range_px + 1, max_range_px + 1))
     # d is the computed range from rm
-    for d in range(max_range_px + 1):
-        norm = 0.0
-        # r is the observed range from lidar
-        for r in range(max_range_px + 1):
-            prob = 0.0
-            z = r - d
-            # reflects from the intented object
-            prob += (
-                z_hit
-                * jnp.exp(-(z**2) / (2.0 * sigma_hit**2))
-                / (sigma_hit * jnp.sqrt(2.0 * np.pi))
-            )
-            # observed range is less than predicted range (short reading)
-            prob = jax.lax.select((r < d), prob + 2 * z_short * (d - r) / d, prob)
-            # errorneous max range measurement
-            prob = jax.lax.select((r == max_range_px), prob + z_max, prob)
-            # random measurement
-            prob = jax.lax.select(
-                (r < max_range_px), prob + z_rand / max_range_px, prob
-            )
+    drange = jnp.arange(max_range_px + 1)
+    # r is the observed range from lidar
+    rrange = jnp.arange(max_range_px + 1)
+    dm, rm = jnp.meshgrid(drange, rrange)
+    dr = jnp.stack((dm.flatten(), rm.flatten()))
+    d = dr[0, :]
+    r = dr[1, :]
+    z = r - d
 
-            norm += prob
-            sensor_model_table.at[r, d].set(prob)
+    prob = (
+        z_hit
+        * jnp.exp(-(z**2) / (2.0 * sigma_hit**2))
+        / (sigma_hit * jnp.sqrt(2.0 * jnp.pi))
+    )
+    prob = jax.lax.select((r < d), prob + 2 * z_short * (d - r) / d, prob)
+    prob = jax.lax.select((r == max_range_px), prob + z_max, prob)
+    prob = jax.lax.select((r < max_range_px), prob + z_rand / max_range_px, prob)
+    sensor_model_table = sensor_model_table.at[r, d].set(prob)
 
-        # normalize
-        sensor_model_table.at[:, d].divide(norm)
+    # normalize each row
+    row_sum = jnp.sum(sensor_model_table, axis=1)
+    sensor_model_table = sensor_model_table.at[drange, :].divide(row_sum)
 
     return sensor_model_table
 
 
 def motion_update(particle_state: Array, action: Array) -> ArrayLike:
+    # TODO: motion update, vmapped over all particles
+    # TODO: returns updated state
     pass
 
 
 def sensor_update(particle_state: Array, observation: Array) -> ArrayLike:
+    # TODO: sensor update, vmapped over all particles
+    # TODO: returns weighting for each particle
     pass
 
 
-def mcl_update(particles: Array, action: Array, observation: Array):
+def mcl_init(
+    permissible: Array,
+    max_particles: int,
+    orig_x: float,
+    orig_y: float,
+    orig_t: float,
+    resolution: float,
+) -> ArrayLike:
+    # TODO: initialize global particle states
+    pass
 
+
+def mcl_update(particles: Array, action: Array, observation: Array) -> ArrayLike:
+    # stateless MCL update
+    # TODO: 1. motion update, all particles
+    # TODO: 2. sensor update, all particles
+    # TODO: 3. normalize all particle weights
+    # TODO: 4. resampling with new weights
+    # TODO: 5. draw new proposal distribution from particle weights
+    #          and update proposal distribution
     pass
