@@ -23,8 +23,8 @@ def xy_2_rc(
     orig_y: float,
     orig_c: float,
     orig_s: float,
-    height: float,
-    width: float,
+    height: int,
+    width: int,
     resolution: float,
 ) -> ArrayLike:
     """Transform x, y coordinates to row, column coordinates in occupancy map
@@ -43,16 +43,16 @@ def xy_2_rc(
         cosine of map origin rotation
     orig_s : float
         sine of map origin rotation
-    height : float
+    height : int
         occupancy map height
-    width : float
+    width : int
         occupancy map width
     resolution : float
         occupancy map resolution in m/pixel
 
     Returns
     -------
-    Tuple[int]
+    ArrayLike
         row, column cooridnate
     """
     # translation
@@ -66,10 +66,58 @@ def xy_2_rc(
     # clip the state to be a cell:
     r = jnp.clip(y_rot / resolution, min=0, max=height)
     c = jnp.clip(x_rot / resolution, min=0, max=width)
-    
+
     rc = jnp.array([r, c], dtype=int)
 
     return rc
+
+
+@jax.jit
+@chex.assert_max_traces(n=2)
+def rc_2_xy(
+    rc: Array,
+    orig_x: float,
+    orig_y: float,
+    orig_c: float,
+    orig_s: float,
+    orig_theta: float,
+    resolution: float,
+) -> ArrayLike:
+    """Transform row column coordinates to x, y coordinates in world
+
+    Parameters
+    ----------
+    rc : Array
+        row column coordinates
+    orig_x : float
+        x position of map origin
+    orig_y : float
+        y position of map origin
+    orig_c : float
+        cosine of map origin rotation
+    orig_s : float
+        sine of map origin rotation
+    orig_theta : float
+        map origin rotation
+    resolution : float
+        occupancy map resolution in m/pixel
+
+    Returns
+    -------
+    ArrayLike
+        x, y, theta cooridnate
+    """
+    # rotation
+    x_rot = orig_c * rc[:, 0] - orig_s * rc[:, 1]
+    y_rot = orig_s * rc[:, 0] + orig_c * rc[:, 1]
+
+    x = x_rot * resolution + orig_x
+    y = y_rot * resolution + orig_y
+    theta = rc[:, 2] + orig_theta
+    
+    xyt = jnp.vstack((x, y, theta)).T
+
+    return xyt
 
 
 @jax.jit

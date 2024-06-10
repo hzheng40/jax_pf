@@ -7,7 +7,7 @@ requires-python = ">=3.10"
 dependencies = ["jax[cuda12]", "chex", "distrax", "scipy"]
 
 [project.optional-dependencies]
-test = ["pytest", "requests", "Pillow", "pyyaml"]
+test = ["pytest", "requests", "Pillow", "pyyaml", "matplotlib"]
 
 [build-system]
 requires = ["setuptools >= 61.0"]
