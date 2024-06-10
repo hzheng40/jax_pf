@@ -131,7 +131,7 @@ def motion_update(
     return particle_state, rng
 
 
-@jax.jit
+@partial(jax.jit, static_argnums=[5])
 @chex.assert_max_traces(n=2)
 def sensor_update(
     particle_state: Array,
@@ -206,7 +206,7 @@ def sensor_update(
         updated weight for each particle
     """
 
-    # TODO: 1. calculate scans of all particles
+    # 1. calculate scans of all particles
     get_scan_vmapped = jax.vmap(
         get_scan,
         in_axes=[
@@ -249,14 +249,13 @@ def sensor_update(
         max_range,
     )
 
-    print(scans.shape)  # TODO: should be (num_particles, num_beams)
-
-    # TODO: 2. resolve sensor model, discretize and index into precomputed table
-    max_range_px = int(max_range / resolution)
+    # 2. resolve sensor model, discretize and index into precomputed table
+    max_range_px = (max_range / resolution).astype(int)
     observation = observation / resolution
     scans = scans / resolution
-    observation.at[observation > max_range_px].set(max_range_px)
-    scans.at[scans > max_range_px].set(max_range_px)
+    # clip scans by max range
+    observation = jnp.clip(observation, max=max_range_px)
+    scans = jnp.clip(scans, max=max_range_px)
 
     intobservation = jnp.rint(observation).astype(jnp.uint16)
     intscans = jnp.rint(scans).astype(jnp.uint16)
@@ -264,15 +263,14 @@ def sensor_update(
     @partial(jax.vmap, in_axes=[None, 0, None])
     def get_weight(table, pscan, obs):
         weight = jnp.power(jnp.prod(table[obs, pscan]), inv_squash_factor)
+        return weight
 
     weights = get_weight(sensor_model_table, intscans, intobservation)
-
-    print(weights.shape)  # TODO: should be (num_particles, 1)
 
     return weights
 
 
-@jax.jit
+@partial(jax.jit, static_argnums=[2])
 @chex.assert_max_traces(n=2)
 def mcl_init(
     rng: PRNGKey,
@@ -318,13 +316,16 @@ def mcl_init(
 
     rng, ind_rng, heading_rng = jax.random.split(rng, 3)
 
-    permissible_ind_r, permissible_ind_c = jnp.where(omap == 0)
+    # permissible feature cannot be supported by jax
+    # have to initialize over entire map
+    permissible_ind_r = jnp.arange(omap.shape[0], dtype=int)
+    permissible_ind_c = jnp.arange(omap.shape[1], dtype=int)
     chosen_ind = jax.random.randint(
-        ind_rng, shape=(num_particles,), minval=0, maxval=len(permissible_ind_r)
-    )
+        ind_rng, shape=(num_particles, 1), minval=0, maxval=len(permissible_ind_r)
+    ).flatten()
     random_headings = jax.random.uniform(
-        heading_rng, shape=(num_particles,), minval=0.0, maxval=2 * jnp.pi
-    )
+        heading_rng, shape=(num_particles, 1), minval=0.0, maxval=2 * jnp.pi
+    ).flatten()
 
     # particles in pixel coordinates
     particles = jnp.zeros((num_particles, 3))
@@ -376,16 +377,13 @@ def mcl_init_with_pose(
     # particles state
     particles = noises + pose
 
-    # TODO should be (num_particles, 3)
-    print(particles.shape)
-
     # initialize weight for each particle uniformly
     weights = jnp.ones(num_particles) / num_particles
 
     return particles, weights, rng
 
 
-@jax.jit
+@partial(jax.jit, static_argnums=[12])
 @chex.assert_max_traces(n=2)
 def mcl_update(
     rng: PRNGKey,
@@ -484,7 +482,9 @@ def mcl_update(
     rng, redraw_rng = jax.random.split(rng, 2)
 
     # 0. redraw particles based on previous weight
-    proposal_ind = jax.random.choice(redraw_rng, a=particles.shape[0], p=weights)
+    proposal_ind = jax.random.choice(
+        redraw_rng, a=particles.shape[0], shape=(particles.shape[0], 1), p=weights
+    ).flatten()
     proposal_particles = particles[proposal_ind, :]
 
     # 1. motion update, all particles
