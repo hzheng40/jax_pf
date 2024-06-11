@@ -70,10 +70,137 @@ def test_sensor_table():
     plt.show()
 
 
-def test_localization(traj, dt):
-    theta_dis = 112
+def test_motion_update():
+    rng = jax.random.PRNGKey(0)
+    # x, y, theta
+    starting_pose = jnp.array([[0.0, 0.0, 0.0], [0.0, 0.0, -0.2], [3.0, 0.0, 0.0]])
+    # steer, speed
+    action = jnp.array([0.3, 5.0])
+    new_poses, rng = motion_update(rng, starting_pose, action, 0.01, 0.0, 0.0, 0.0, 0.32)
+    print(new_poses)
+
+def test_sensor_update(traj, dt):
+    index = 10
+    num_particles = 10
+    z_short = 0.01
+    z_max = 0.07
+    z_rand = 0.12
+    z_hit = 0.75
+    sigma_hit = 8.0
+    theta_dis = 2000
     fov = 4.7
-    num_beams = 99
+    num_beams = 1080
+    angle_increment = fov / (num_beams - 1)
+    theta_index_increment = theta_dis * angle_increment / (2 * jnp.pi)
+    theta_arr = jnp.linspace(0.0, 2 * jnp.pi, num=theta_dis)
+    sines = jnp.sin(theta_arr)
+    cosines = jnp.cos(theta_arr)
+    eps = 0.0001
+    orig_x = dt.origin[0]
+    orig_y = dt.origin[1]
+    orig_c = jnp.cos(dt.origin[2])
+    orig_s = jnp.sin(dt.origin[2])
+    height = dt.omap.shape[0]
+    width = dt.omap.shape[1]
+    resolution = dt.resolution
+    omap = dt.omap
+    max_range = 30.0
+    max_range_px = int(max_range / resolution)
+    inv_squash_factor = 2.2
+
+    omap = dt.omap
+    scans = traj.scans
+    poses = traj.poses
+    true_pose = poses[index, :]
+    true_scan = scans[index, :]
+
+    rng = jax.random.PRNGKey(0)
+    rng, noise_rng = jax.random.split(rng, 2)
+    noises = jax.random.normal(noise_rng, (num_particles, 3))
+    noises = noises.at[:, 2].multiply(0.2)
+    noises = noises.at[0, :].multiply(0.0)
+    particles = true_pose + noises
+
+    sensor_table = compute_sensor_model(
+        z_short, z_max, z_rand, z_hit, sigma_hit, max_range_px
+    )
+
+    weights = sensor_update(particles, true_scan, sensor_table, theta_dis, fov, num_beams, theta_index_increment, sines, cosines, eps, orig_x, orig_y, orig_c, orig_s, height, width, resolution, omap, max_range, inv_squash_factor)
+
+    theta_index = theta_dis * (particles[:, 2] - fov / 2.0) / (2.0 * jnp.pi)
+    # make sure it's wrapped properly
+    theta_index = jnp.fmod(theta_index, theta_dis).astype(int)
+    # inc = lambda x: x + theta_dis
+    # noinc = lambda x: x
+    # theta_index = jax.lax.cond((theta_index < 0), inc, noinc, theta_index)
+
+    theta_indices = jnp.linspace(
+        start=theta_index,
+        stop=theta_index + theta_index_increment * num_beams,
+        num=num_beams,
+        endpoint=True,
+        dtype=int,
+    )
+
+    thetas = theta_arr[theta_indices].T
+
+    get_scan_vmapped = jax.vmap(
+        get_scan,
+        in_axes=[
+            0,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ],
+    )
+    scans = get_scan_vmapped(
+        particles,
+        theta_dis,
+        fov,
+        num_beams,
+        theta_index_increment,
+        sines,
+        cosines,
+        eps,
+        orig_x,
+        orig_y,
+        orig_c,
+        orig_s,
+        height,
+        width,
+        resolution,
+        omap,
+        max_range,
+    )
+
+    print(np.array(weights))
+
+    import matplotlib.pyplot as plt
+
+    fig, ax = plt.subplots(subplot_kw={'projection': 'polar'})
+    for i in range(1, num_particles):
+        ax.scatter(thetas[i, :], scans[i, :], alpha=float(weights[i]))
+    ax.scatter(thetas[0, :],  true_scan)
+    plt.show()
+
+
+def test_localization(traj, dt):
+    theta_dis = 2000
+    fov = 4.7
+    num_beams = 1080
     angle_increment = fov / (num_beams - 1)
     theta_index_increment = theta_dis * angle_increment / (2 * jnp.pi)
     theta_arr = jnp.linspace(0.0, 2 * jnp.pi, num=theta_dis)
@@ -119,9 +246,10 @@ def test_localization(traj, dt):
 
     # init pf
     rng = jax.random.PRNGKey(0)
-    particles, weights, rng = mcl_init(
-        rng, omap, num_particles, orig_x, orig_y, orig_c, orig_s, orig_t, resolution
-    )
+    # particles, weights, rng = mcl_init(
+    #     rng, omap, num_particles, orig_x, orig_y, orig_c, orig_s, orig_t, resolution
+    # )
+    particles, weights, rng = mcl_init_with_pose(rng, all_poses[0, :], num_particles)
 
     all_pf_xs = []
     all_pf_ys = []
@@ -131,14 +259,15 @@ def test_localization(traj, dt):
         action = all_actions[i, :]
         true_pose = all_poses[i, :]
         scan = all_scans[i, :]
-        downsampled_scan = scan[::scan_downsample_step]
+        # downsampled_scan = scan[::scan_downsample_step]
 
         particles, weights, rng = mcl_update(
             rng,
             particles,
             weights,
             action,
-            downsampled_scan,
+            scan,
+            0.01,
             motion_dispersion_x,
             motion_dispersion_y,
             motion_dispersion_t,

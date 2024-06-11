@@ -82,6 +82,7 @@ def motion_update(
     rng: PRNGKey,
     particle_state: Array,
     action: Array,
+    dt: float,
     dispersion_x: float,
     dispersion_y: float,
     dispersion_t: float,
@@ -96,7 +97,9 @@ def motion_update(
     particle_state : Array
         current particle states
     action : Array
-        action taken at previous step
+        action taken at previous step (steer, speed)
+    dt : float
+        time difference between steps
     dispersion_x : float
         x coordinate motion dispersion
     dispersion_y : float
@@ -113,12 +116,14 @@ def motion_update(
         2. The rng key after split
     """
 
-    # kinematic model, action is (speed, steer)
+    # kinematic model, action is (steer, speed)
     cosines = jnp.cos(particle_state[:, 2])
     sines = jnp.sin(particle_state[:, 2])
-    particle_state = particle_state.at[:, 0].add(cosines * action[0])
-    particle_state = particle_state.at[:, 1].add(sines * action[0])
-    particle_state = particle_state.at[:, 2].add((action[1] / lwb) * jnp.tan(action[1]))
+    particle_state = particle_state.at[:, 0].add(dt * cosines * action[1])
+    particle_state = particle_state.at[:, 1].add(dt * sines * action[1])
+    particle_state = particle_state.at[:, 2].add(
+        dt * (action[0] / lwb) * jnp.tan(action[0])
+    )
     # add noise
     rng, noise_rng = jax.random.split(rng)
     noise = jax.random.normal(noise_rng, particle_state.shape)
@@ -257,8 +262,8 @@ def sensor_update(
     observation = jnp.clip(observation, max=max_range_px)
     scans = jnp.clip(scans, max=max_range_px)
 
-    intobservation = jnp.rint(observation).astype(jnp.uint16)
-    intscans = jnp.rint(scans).astype(jnp.uint16)
+    intobservation = jnp.rint(observation).astype(int)
+    intscans = jnp.rint(scans).astype(int)
 
     @partial(jax.vmap, in_axes=[None, 0, None])
     def get_weight(table, pscan, obs):
@@ -344,7 +349,7 @@ def mcl_init(
     return particles, weights, rng
 
 
-@jax.jit
+@partial(jax.jit, static_argnums=[2])
 @chex.assert_max_traces(n=2)
 def mcl_init_with_pose(
     rng: PRNGKey,
@@ -383,7 +388,7 @@ def mcl_init_with_pose(
     return particles, weights, rng
 
 
-@partial(jax.jit, static_argnums=[12])
+@partial(jax.jit, static_argnums=[13])
 @chex.assert_max_traces(n=2)
 def mcl_update(
     rng: PRNGKey,
@@ -391,6 +396,7 @@ def mcl_update(
     weights: Array,
     action: Array,
     observation: Array,
+    dtime: float,
     dispersion_x: float,
     dispersion_y: float,
     dispersion_t: float,
@@ -428,6 +434,8 @@ def mcl_update(
         action taken at previous step
     observation : Array
         current actual scan observation
+    dtime : float
+        difference in time for current step
     dispersion_x : float
         x coordinate motion dispersion
     dispersion_y : float
@@ -489,7 +497,14 @@ def mcl_update(
 
     # 1. motion update, all particles
     proposal_particles, rng = motion_update(
-        rng, proposal_particles, action, dispersion_x, dispersion_y, dispersion_t, lwb
+        rng,
+        proposal_particles,
+        action,
+        dtime,
+        dispersion_x,
+        dispersion_y,
+        dispersion_t,
+        lwb,
     )
     # 2. sensor update, all particles
     new_weights = sensor_update(
