@@ -15,7 +15,7 @@ from .ray_marching import get_scan, rc_2_xy
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 
 
-@partial(jax.jit, static_argnums=[5])
+@partial(jax.jit, static_argnums=[6])
 @chex.assert_max_traces(n=2)
 def compute_sensor_model(
     z_short: float,
@@ -23,10 +23,12 @@ def compute_sensor_model(
     z_rand: float,
     z_hit: float,
     sigma_hit: float,
+    lambda_short: float,
     max_range_px: int,
 ) -> ArrayLike:
     """Generate and store a table which represents the sensor model.
     For each discrete computed range value, this provides the probability of measuring any (discrete) range.
+    Probablistic Robotics Chapter 6.3.1
 
     Parameters
     ----------
@@ -40,6 +42,8 @@ def compute_sensor_model(
         _description_
     sigma_hit : float
         _description_
+    lambda_short : float
+        short exponentioal dist. param
     max_range_px : int
         maximum scan range in pixels
 
@@ -59,19 +63,32 @@ def compute_sensor_model(
     r = dr[1, :]
     z = r - d
 
+    # normal
     prob = (
         z_hit
         * jnp.exp(-(z**2) / (2.0 * sigma_hit**2))
         / (sigma_hit * jnp.sqrt(2.0 * jnp.pi))
     )
-    prob = jax.lax.select((r < d), prob + 2 * z_short * (d - r) / d, prob)
+    # short exponential
+    prob = jax.lax.select(
+        (r < d),
+        prob
+        + z_short
+        * (
+            (lambda_short * jnp.exp(-lambda_short * r))
+            / (1 - jnp.exp(-lambda_short * d))
+        ),
+        prob,
+    )
+    # sensor failures (measuring max instead of actual value)
     prob = jax.lax.select((r == max_range_px), prob + z_max, prob)
+    # random measurement noise
     prob = jax.lax.select((r < max_range_px), prob + z_rand / max_range_px, prob)
     sensor_model_table = sensor_model_table.at[r, d].set(prob)
 
-    # normalize each row
-    row_sum = jnp.sum(sensor_model_table, axis=1)
-    sensor_model_table = sensor_model_table.at[drange, :].divide(row_sum)
+    # normalize each col
+    col_sum = jnp.sum(sensor_model_table, axis=0)
+    sensor_model_table = sensor_model_table.at[:, drange].divide(col_sum)
 
     return sensor_model_table
 
@@ -267,11 +284,14 @@ def sensor_update(
 
     @partial(jax.vmap, in_axes=[None, 0, None])
     def get_weight(table, pscan, obs):
-        weight = jnp.power(jnp.prod(table[obs, pscan]), inv_squash_factor)
+        weight = jnp.sum(jnp.log(table[obs, pscan]))
+        # jax.debug.print("weights: {w}", w=table[obs, pscan])
+        # weight = jnp.power(weight, inv_squash_factor)
         return weight
 
     weights = get_weight(sensor_model_table, intscans, intobservation)
-
+    weights = (weights - weights.min())
+    weights /= (weights.max() + 0.0000001)
     return weights
 
 
@@ -419,7 +439,7 @@ def mcl_update(
     dt: ArrayLike,
     max_range: float,
     inv_squash_factor: float,
-) -> Tuple[ArrayLike, ArrayLike, PRNGKey]:
+) -> Tuple[ArrayLike, ArrayLike, ArrayLike, PRNGKey]:
     """Stateless mcl update step
 
     Parameters
@@ -483,16 +503,21 @@ def mcl_update(
 
     Returns
     -------
-    Tuple[ArrayLike, ArrayLike, PRNGKey]
-        New particle state, weights, and rng key after split
+    Tuple[ArrayLike, ArrayLike, ArrayLike, PRNGKey]
+        New particle state, weights, current estimate, and rng key after split
     """
     # stateless MCL update
     rng, redraw_rng = jax.random.split(rng, 2)
+
+    # # renormalize weights
+    # weights = weights / jnp.sum(weights)
 
     # 0. redraw particles based on previous weight
     proposal_ind = jax.random.choice(
         redraw_rng, a=particles.shape[0], shape=(particles.shape[0], 1), p=weights
     ).flatten()
+    # proposal_ind = jax.random.choice(
+    #     redraw_rng, a=particles.shape[0], shape=(particles.shape[0], 1)).flatten()
     proposal_particles = particles[proposal_ind, :]
 
     # 1. motion update, all particles
@@ -532,5 +557,7 @@ def mcl_update(
     # 3. normalize all particle weights
     new_weights = new_weights / jnp.sum(new_weights)
 
-    # 4. return new particle state and new weights
-    return proposal_particles, new_weights, rng
+    # 4. return new particle state and new weights and current estimate
+    # current_estimate = jnp.sum(jnp.multiply(proposal_particles, new_weights[:,None]), axis=0)
+    current_estimate = jnp.dot(new_weights, proposal_particles)
+    return proposal_particles, new_weights, current_estimate, rng

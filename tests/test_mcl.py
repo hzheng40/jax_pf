@@ -13,6 +13,8 @@ from PIL import Image
 import tempfile
 import yaml
 
+# jax.config.update("jax_enable_x64", True)
+
 Trajectory = namedtuple("Trajectory", ["poses", "scans", "actions"])
 MapInfo = namedtuple("MapInfo", ["omap", "resolution", "origin"])
 
@@ -56,17 +58,23 @@ def dt():
 
 
 def test_sensor_table():
-    z_short = 0.01
-    z_max = 0.07
-    z_rand = 0.12
+    z_short = 0.20
+    z_max = 0.01
+    z_rand = 0.04
     z_hit = 0.75
     sigma_hit = 8.0
-    max_range_px = int(30 / 0.05796)  # Spielberg
-    table = compute_sensor_model(z_short, z_max, z_rand, z_hit, sigma_hit, max_range_px)
+    lambda_short = 0.03
+    max_range_px = int(10 / 0.05796)  # Spielberg
+    table = compute_sensor_model(z_short, z_max, z_rand, z_hit, sigma_hit, lambda_short, max_range_px)
 
+    print(table.mean(), table.max(), table.min())
     import matplotlib.pyplot as plt
 
     plt.imshow(table)
+    plt.colorbar()
+    plt.show()
+
+    plt.plot(table[:, 75])
     plt.show()
 
 
@@ -82,16 +90,16 @@ def test_motion_update():
 def test_sensor_update(traj, dt):
     index = 10
     num_particles = 10
-    z_short = 0.01
-    z_max = 0.07
-    z_rand = 0.12
+    z_short = 0.20
+    z_max = 0.01
+    z_rand = 0.04
     z_hit = 0.75
     sigma_hit = 8.0
+    lambda_short = 0.03
     theta_dis = 2000
     fov = 4.7
-    num_beams = 1080
-    angle_increment = fov / (num_beams - 1)
-    theta_index_increment = theta_dis * angle_increment / (2 * jnp.pi)
+    # num_beams = 99
+    
     theta_arr = jnp.linspace(0.0, 2 * jnp.pi, num=theta_dis)
     sines = jnp.sin(theta_arr)
     cosines = jnp.cos(theta_arr)
@@ -104,9 +112,10 @@ def test_sensor_update(traj, dt):
     width = dt.omap.shape[1]
     resolution = dt.resolution
     omap = dt.omap
-    max_range = 30.0
+    max_range = 10.0
     max_range_px = int(max_range / resolution)
-    inv_squash_factor = 2.2
+    inv_squash_factor = 1.0
+    angle_step = 20
 
     omap = dt.omap
     scans = traj.scans
@@ -114,18 +123,24 @@ def test_sensor_update(traj, dt):
     true_pose = poses[index, :]
     true_scan = scans[index, :]
 
+    downsampled_scan = true_scan[::angle_step]
+    num_beams = downsampled_scan.shape[0]
+    angle_increment = fov / (num_beams - 1)
+    theta_index_increment = theta_dis * angle_increment / (2 * jnp.pi)
+
     rng = jax.random.PRNGKey(0)
     rng, noise_rng = jax.random.split(rng, 2)
     noises = jax.random.normal(noise_rng, (num_particles, 3))
     noises = noises.at[:, 2].multiply(0.2)
     noises = noises.at[0, :].multiply(0.0)
+    # noises = jnp.zeros_like(noises)
     particles = true_pose + noises
 
     sensor_table = compute_sensor_model(
-        z_short, z_max, z_rand, z_hit, sigma_hit, max_range_px
+        z_short, z_max, z_rand, z_hit, sigma_hit, lambda_short, max_range_px
     )
 
-    weights = sensor_update(particles, true_scan, sensor_table, theta_dis, fov, num_beams, theta_index_increment, sines, cosines, eps, orig_x, orig_y, orig_c, orig_s, height, width, resolution, omap, max_range, inv_squash_factor)
+    weights = sensor_update(particles, downsampled_scan, sensor_table, theta_dis, fov, num_beams, theta_index_increment, sines, cosines, eps, orig_x, orig_y, orig_c, orig_s, height, width, resolution, omap, max_range, inv_squash_factor)
 
     theta_index = theta_dis * (particles[:, 2] - fov / 2.0) / (2.0 * jnp.pi)
     # make sure it's wrapped properly
@@ -188,19 +203,32 @@ def test_sensor_update(traj, dt):
 
     print(np.array(weights))
 
+    angle_increment = fov / (len(true_scan) - 1)
+    theta_index_increment = theta_dis * angle_increment / (2 * jnp.pi)
+    true_theta_ind = jnp.linspace(
+        start=theta_index[0],
+        stop=theta_index[0] + theta_index_increment * len(true_scan),
+        num=len(true_scan),
+        endpoint=True,
+        dtype=int,
+    )
+
     import matplotlib.pyplot as plt
 
     fig, ax = plt.subplots(subplot_kw={'projection': 'polar'})
+    ax.scatter(theta_arr[true_theta_ind],  true_scan, s=2, marker="x")
     for i in range(1, num_particles):
-        ax.scatter(thetas[i, :], scans[i, :], alpha=float(weights[i]))
-    ax.scatter(thetas[0, :],  true_scan)
+        ax.scatter(thetas[i, :], scans[i, :], s = 2, alpha=float(weights[i])/2)
+        # ax.scatter(thetas[i, :], scans[i, :], s=2)
+    
+    ax.set_ylim([0, 5])
     plt.show()
 
 
 def test_localization(traj, dt):
     theta_dis = 2000
     fov = 4.7
-    num_beams = 1080
+    num_beams = 99
     angle_increment = fov / (num_beams - 1)
     theta_index_increment = theta_dis * angle_increment / (2 * jnp.pi)
     theta_arr = jnp.linspace(0.0, 2 * jnp.pi, num=theta_dis)
@@ -216,26 +244,27 @@ def test_localization(traj, dt):
     width = dt.omap.shape[1]
     resolution = dt.resolution
     omap = dt.omap
-    max_range = 30.0
+    max_range = 10.0
 
     z_short = 0.01
-    z_max = 0.07
-    z_rand = 0.12
-    z_hit = 0.75
-    sigma_hit = 8.0
+    z_max = 0.01
+    z_rand = 0.01
+    z_hit = 0.97
+    sigma_hit = 1.0
+    lambda_short = 0.03
     max_range_px = int(max_range / resolution)  # Spielberg
-    num_particles = 200
+    num_particles = 4000
 
-    motion_dispersion_x = 0.05
-    motion_dispersion_y = 0.025
-    motion_dispersion_t = 0.25
+    motion_dispersion_x = 1.0
+    motion_dispersion_y = 1.0
+    motion_dispersion_t = 0.01
 
-    inv_squash_factor = 2.2
+    inv_squash_factor = 1/2.2
 
     lwb = 0.32
 
     sensor_table = compute_sensor_model(
-        z_short, z_max, z_rand, z_hit, sigma_hit, max_range_px
+        z_short, z_max, z_rand, z_hit, sigma_hit, lambda_short, max_range_px
     )
 
     all_poses = traj.poses
@@ -254,19 +283,20 @@ def test_localization(traj, dt):
     all_pf_xs = []
     all_pf_ys = []
     all_pf_ts = []
+    est = []
 
     for i in range(all_poses.shape[0]):
         action = all_actions[i, :]
         true_pose = all_poses[i, :]
         scan = all_scans[i, :]
-        # downsampled_scan = scan[::scan_downsample_step]
+        downsampled_scan = scan[::scan_downsample_step]
 
-        particles, weights, rng = mcl_update(
+        particles, weights, current_estimate, rng = mcl_update(
             rng,
             particles,
             weights,
             action,
-            scan,
+            downsampled_scan,
             0.01,
             motion_dispersion_x,
             motion_dispersion_y,
@@ -294,29 +324,38 @@ def test_localization(traj, dt):
         all_pf_xs.append(particles[:, 0])
         all_pf_ys.append(particles[:, 1])
         all_pf_ts.append(particles[:, 2])
+        est.append(current_estimate)
     
     
     all_pf_xs = np.array(all_pf_xs)
     all_pf_ys = np.array(all_pf_ys)
     all_pf_ts = np.array(all_pf_ts)
+    est = np.array(est)
+    print(est.shape)
     
     import matplotlib.pyplot as plt
     
     ax1 = plt.subplot(311)
-    plt.plot(np.arange(all_pf_xs.shape[0]), all_pf_xs, alpha=0.2)
-    plt.plot(np.arange(all_pf_xs.shape[0]), all_poses[:, 0])
-    # ax1.title("all particle xs vs true x")
+    plt.plot(np.arange(all_pf_xs.shape[0]), all_pf_xs, alpha=0.1)
+    plt.plot(np.arange(est.shape[0]), est[:, 0])
+    plt.plot(np.arange(all_poses.shape[0]), all_poses[:, 0], linestyle="--")
+    
+    # ax1.ti, alpha=0.2ll particle xs vs true x")
 
     # share x only
     ax2 = plt.subplot(312, sharex=ax1)
-    plt.plot(np.arange(all_pf_ys.shape[0]), all_pf_ys, alpha=0.2)
-    plt.plot(np.arange(all_pf_ys.shape[0]), all_poses[:, 1])
+    plt.plot(np.arange(all_pf_ys.shape[0]), all_pf_ys, alpha=0.1)
+    plt.plot(np.arange(est.shape[0]), est[:, 1])
+    plt.plot(np.arange(all_poses.shape[0]), all_poses[:, 1], linestyle="--")
+    
     # ax2.title("all particle ys vs true y")
 
     # share x and y
     ax3 = plt.subplot(313, sharex=ax1)
-    plt.plot(np.arange(all_pf_ts.shape[0]), all_pf_ts, alpha=0.2)
-    plt.plot(np.arange(all_pf_ts.shape[0]), all_poses[:, 2])
+    plt.plot(np.arange(all_pf_ts.shape[0]), all_pf_ts, alpha=0.1)
+    plt.plot(np.arange(est.shape[0]), est[:, 2])
+    plt.plot(np.arange(all_poses.shape[0]), all_poses[:, 2], linestyle="--")
+    
     # ax3.title("all particle thetas vs true theta")
     
     plt.show()
