@@ -1,4 +1,3 @@
-
 [project]
 name = "jax_pf"
 authors = [{ name = "Hongrui Zheng", email = "hongruiz@seas.upenn.edu" }]
