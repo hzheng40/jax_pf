@@ -99,11 +99,9 @@ def motion_update(
     rng: PRNGKey,
     particle_state: Array,
     action: Array,
-    dt: float,
     dispersion_x: float,
     dispersion_y: float,
     dispersion_t: float,
-    lwb: float,
 ) -> Tuple[ArrayLike, PRNGKey]:
     """Motion update of all particles, uses kinematics model
 
@@ -114,17 +112,13 @@ def motion_update(
     particle_state : Array
         current particle states
     action : Array
-        action taken at previous step (steer, speed)
-    dt : float
-        time difference between steps
+        change in odometry (accumulated with kinematic model)
     dispersion_x : float
         x coordinate motion dispersion
     dispersion_y : float
         y coordinate motion dispersion
     dispersion_t : float
         yaw coordinate motion dispersion
-    lwb : float
-        vehicle wheel base
 
     Returns
     -------
@@ -136,11 +130,13 @@ def motion_update(
     # kinematic model, action is (steer, speed)
     cosines = jnp.cos(particle_state[:, 2])
     sines = jnp.sin(particle_state[:, 2])
-    particle_state = particle_state.at[:, 0].add(dt * cosines * action[1])
-    particle_state = particle_state.at[:, 1].add(dt * sines * action[1])
-    particle_state = particle_state.at[:, 2].add(
-        dt * (action[0] / lwb) * jnp.tan(action[0])
+    particle_state = particle_state.at[:, 0].add(
+        cosines * action[0] - sines * action[1]
     )
+    particle_state = particle_state.at[:, 1].add(
+        sines * action[0] + cosines * action[1]
+    )
+    particle_state = particle_state.at[:, 2].add(action[2])
     # add noise
     rng, noise_rng = jax.random.split(rng)
     noise = jax.random.normal(noise_rng, particle_state.shape)
@@ -175,7 +171,6 @@ def sensor_update(
     resolution: float,
     dt: ArrayLike,
     max_range: float,
-    inv_squash_factor: float,
 ) -> ArrayLike:
     """Sensor update of all particles, returns weighting for each particle based on actual observation
 
@@ -219,8 +214,6 @@ def sensor_update(
         euclidean distance transform of map
     max_range : float
         maximum ray lenth
-    inv_squash_factor : float
-        particle weight squashing factor
 
     Returns
     -------
@@ -285,13 +278,11 @@ def sensor_update(
     @partial(jax.vmap, in_axes=[None, 0, None])
     def get_weight(table, pscan, obs):
         weight = jnp.sum(jnp.log(table[obs, pscan]))
-        # jax.debug.print("weights: {w}", w=table[obs, pscan])
-        # weight = jnp.power(weight, inv_squash_factor)
         return weight
 
     weights = get_weight(sensor_model_table, intscans, intobservation)
-    weights = (weights - weights.min())
-    weights /= (weights.max() + 0.0000001)
+    weights = weights - weights.min()
+    weights /= weights.max() + 0.0000001
     return weights
 
 
@@ -408,7 +399,7 @@ def mcl_init_with_pose(
     return particles, weights, rng
 
 
-@partial(jax.jit, static_argnums=[13])
+@partial(jax.jit, static_argnums=[11])
 @chex.assert_max_traces(n=2)
 def mcl_update(
     rng: PRNGKey,
@@ -416,11 +407,9 @@ def mcl_update(
     weights: Array,
     action: Array,
     observation: Array,
-    dtime: float,
     dispersion_x: float,
     dispersion_y: float,
     dispersion_t: float,
-    lwb: float,
     sensor_model_table: Array,
     theta_dis: int,
     fov: float,
@@ -438,7 +427,6 @@ def mcl_update(
     resolution: float,
     dt: ArrayLike,
     max_range: float,
-    inv_squash_factor: float,
 ) -> Tuple[ArrayLike, ArrayLike, ArrayLike, PRNGKey]:
     """Stateless mcl update step
 
@@ -454,16 +442,12 @@ def mcl_update(
         action taken at previous step
     observation : Array
         current actual scan observation
-    dtime : float
-        difference in time for current step
     dispersion_x : float
         x coordinate motion dispersion
     dispersion_y : float
         y coordinate motion dispersion
     dispersion_t : float
         yaw coordinate motion dispersion
-    lwb : float
-        vehicle wheel base
     sensor_model_table : Array
         precomputed sensor model table
     theta_dis : int
@@ -498,8 +482,6 @@ def mcl_update(
         euclidean distance transform of map
     max_range : float
         maximum ray lenth
-    inv_squash_factor : float
-        particle weight squashing factor
 
     Returns
     -------
@@ -525,11 +507,9 @@ def mcl_update(
         rng,
         proposal_particles,
         action,
-        dtime,
         dispersion_x,
         dispersion_y,
         dispersion_t,
-        lwb,
     )
     # 2. sensor update, all particles
     new_weights = sensor_update(
@@ -552,7 +532,6 @@ def mcl_update(
         resolution,
         dt,
         max_range,
-        inv_squash_factor,
     )
     # 3. normalize all particle weights
     new_weights = new_weights / jnp.sum(new_weights)
