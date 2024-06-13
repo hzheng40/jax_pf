@@ -1,5 +1,5 @@
-from jax_pf.src.mcl import *
-from jax_pf.src.ray_marching import edt
+from src.jax_pf.mcl import *
+from src.jax_pf.ray_marching import edt
 
 import pytest
 import numpy as np
