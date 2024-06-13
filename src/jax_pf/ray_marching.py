@@ -64,8 +64,8 @@ def xy_2_rc(
     y_rot = -x_trans * orig_s + y_trans * orig_c
 
     # clip the state to be a cell:
-    r = jnp.clip(y_rot / resolution, min=0, max=height)
-    c = jnp.clip(x_rot / resolution, min=0, max=width)
+    r = jnp.clip(y_rot / resolution, a_min=0, a_max=height)
+    c = jnp.clip(x_rot / resolution, a_min=0, a_max=width)
 
     rc = jnp.array([r, c], dtype=int)
 
@@ -257,7 +257,7 @@ def trace_ray(
 
     # ray tracing iterations
     final_dist = jax.lax.while_loop(trace_cond, trace_step, init_dist)
-    total_dist = jnp.clip(final_dist[1], max=max_range)
+    total_dist = jnp.clip(final_dist[1], a_max=max_range)
 
     return total_dist
 

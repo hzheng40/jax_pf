@@ -3,7 +3,12 @@ name = "jax_pf"
 authors = [{ name = "Hongrui Zheng", email = "hongruiz@seas.upenn.edu" }]
 version = "0.1.0"
 requires-python = ">=3.10"
-dependencies = ["jax[cuda12]", "chex", "distrax", "scipy"]
+dependencies = [
+    #"jax[cuda12]",
+    "chex==0.1.81",
+    #"distrax",
+    "scipy"
+    ]
 
 [project.optional-dependencies]
 test = ["pytest", "requests", "Pillow", "pyyaml", "matplotlib"]

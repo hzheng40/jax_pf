@@ -269,8 +269,8 @@ def sensor_update(
     observation = observation / resolution
     scans = scans / resolution
     # clip scans by max range
-    observation = jnp.clip(observation, max=max_range_px)
-    scans = jnp.clip(scans, max=max_range_px)
+    observation = jnp.clip(observation, a_max=max_range_px)
+    scans = jnp.clip(scans, a_max=max_range_px)
 
     intobservation = jnp.rint(observation).astype(int)
     intscans = jnp.rint(scans).astype(int)
