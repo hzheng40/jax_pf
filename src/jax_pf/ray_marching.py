@@ -339,6 +339,7 @@ def get_scan(
         endpoint=True,
         dtype=int,
     )[:, None]
+    theta_indices = jnp.fmod(theta_indices, theta_dis)
 
     # vmap to vectorize each ray march
     # vectorized over multiple theta_index inputs
