@@ -1,15 +1,11 @@
 from functools import partial
 import os
-from typing import Tuple
 
 import jax
 import jax.numpy as jnp
 import chex
 from jax import Array
 from jax.typing import ArrayLike
-
-import numpy as np
-from scipy.ndimage import distance_transform_edt as edt
 
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 
