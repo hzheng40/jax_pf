@@ -11,7 +11,7 @@ os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 
 
 @jax.jit
-@chex.assert_max_traces(n=2)
+@chex.assert_max_traces(n=1)
 def xy_2_rc(
     x: float,
     y: float,
@@ -69,7 +69,7 @@ def xy_2_rc(
 
 
 @jax.jit
-@chex.assert_max_traces(n=2)
+@chex.assert_max_traces(n=1)
 def rc_2_xy(
     rc: Array,
     orig_x: float,
@@ -110,14 +110,14 @@ def rc_2_xy(
     x = x_rot * resolution + orig_x
     y = y_rot * resolution + orig_y
     theta = rc[:, 2] + orig_theta
-    
+
     xyt = jnp.vstack((x, y, theta)).T
 
     return xyt
 
 
 @jax.jit
-@chex.assert_max_traces(n=2)
+@chex.assert_max_traces(n=1)
 def distance_transform(
     x: float,
     y: float,
@@ -166,7 +166,7 @@ def distance_transform(
 
 
 @partial(jax.jit, static_argnums=[5, 14])
-@chex.assert_max_traces(n=2)
+@chex.assert_max_traces(n=1)
 def trace_ray(
     x: float,
     y: float,
@@ -259,7 +259,7 @@ def trace_ray(
 
 
 @partial(jax.jit, static_argnums=[3])
-@chex.assert_max_traces(n=2)
+@chex.assert_max_traces(n=1)
 def get_scan(
     pose: ArrayLike,
     theta_dis: int,
@@ -323,44 +323,42 @@ def get_scan(
     Array
         resulting laser scan at the pose, with length num_beams
     """
-    # make theta discrete by mapping the range [-pi, pi] onto [0, theta_dis]
-    theta_index = theta_dis * (pose[2] - fov / 2.0) / (2.0 * jnp.pi)
-
-    # make sure it's wrapped properly
-    theta_index = jnp.fmod(theta_index, theta_dis)
-    inc = lambda x: x + theta_dis
-    noinc = lambda x: x
-    theta_index = jax.lax.cond((theta_index < 0), inc, noinc, theta_index)
-
+    theta_index_start = theta_dis * (pose[2] - fov / 2.0) / (2.0 * jnp.pi)
     theta_indices = jnp.linspace(
-        start=theta_index,
-        stop=theta_index + theta_index_increment * num_beams,
+        start=theta_index_start,
+        stop=theta_index_start + theta_index_increment * num_beams,
         num=num_beams,
         endpoint=True,
         dtype=int,
     )[:, None]
+    # make sure it's wrapped properly
+    theta_indices = jax.lax.select(
+        theta_indices < 0, theta_indices + theta_dis, theta_indices
+    )
     theta_indices = jnp.fmod(theta_indices, theta_dis)
 
     # vmap to vectorize each ray march
     # vectorized over multiple theta_index inputs
-    trace_ray_vmap = jax.vmap(
-        trace_ray,
-        (
-            None,
-            None,
-            0,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
+    trace_ray_vmap = jax.jit(
+        jax.vmap(
+            trace_ray,
+            (
+                None,
+                None,
+                0,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            ),
         ),
     )
     scan = trace_ray_vmap(

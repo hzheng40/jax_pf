@@ -8,7 +8,6 @@ from jax.random import PRNGKey
 import chex
 from jax import Array
 from jax.typing import ArrayLike
-import numpy as np
 
 from .ray_marching import get_scan, rc_2_xy
 
@@ -16,7 +15,7 @@ os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 
 
 @partial(jax.jit, static_argnums=[6])
-@chex.assert_max_traces(n=2)
+@chex.assert_max_traces(n=1)
 def compute_sensor_model(
     z_short: float,
     z_max: float,
@@ -94,7 +93,7 @@ def compute_sensor_model(
 
 
 @jax.jit
-@chex.assert_max_traces(n=2)
+@chex.assert_max_traces(n=1)
 def motion_update(
     rng: PRNGKey,
     particle_state: Array,
@@ -127,30 +126,38 @@ def motion_update(
         2. The rng key after split
     """
 
-    # kinematic model, action is (steer, speed)
+    # cos/sin from odom
     cosines = jnp.cos(particle_state[:, 2])
     sines = jnp.sin(particle_state[:, 2])
-    particle_state = particle_state.at[:, 0].add(
-        cosines * action[0] - sines * action[1]
-    )
-    particle_state = particle_state.at[:, 1].add(
-        sines * action[0] + cosines * action[1]
-    )
-    particle_state = particle_state.at[:, 2].add(action[2])
+
     # add noise
     rng, noise_rng = jax.random.split(rng)
     noise = jax.random.normal(noise_rng, particle_state.shape)
-    noise = noise.at[:, 0].multiply(dispersion_x)
-    noise = noise.at[:, 1].multiply(dispersion_y)
-    noise = noise.at[:, 2].multiply(dispersion_t)
 
-    particle_state = particle_state + noise
+    # motion update
+    particle_state_x = (
+        particle_state[:, 0]
+        + cosines * action[0]
+        - sines * action[1]
+        + noise[:, 0] * dispersion_x
+    )
+    particle_state_y = (
+        particle_state[:, 1]
+        + sines * action[0]
+        + cosines * action[1]
+        + noise[:, 1] * dispersion_y
+    )
+    particle_state_t = particle_state[:, 2] + action[2] + noise[:, 2] * dispersion_t
+
+    particle_state = jnp.column_stack(
+        (particle_state_x, particle_state_y, particle_state_t)
+    )
 
     return particle_state, rng
 
 
 @partial(jax.jit, static_argnums=[5])
-@chex.assert_max_traces(n=2)
+@chex.assert_max_traces(n=1)
 def sensor_update(
     particle_state: Array,
     observation: Array,
@@ -222,27 +229,30 @@ def sensor_update(
     """
 
     # 1. calculate scans of all particles
-    get_scan_vmapped = jax.vmap(
-        get_scan,
-        in_axes=[
-            0,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-        ],
+    get_scan_vmapped = jax.jit(
+        jax.vmap(
+            get_scan,
+            in_axes=[
+                0,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            ],
+        ),
+        static_argnums=[3],
     )
     scans = get_scan_vmapped(
         particle_state,
@@ -287,7 +297,7 @@ def sensor_update(
 
 
 @partial(jax.jit, static_argnums=[2])
-@chex.assert_max_traces(n=2)
+@chex.assert_max_traces(n=1)
 def mcl_init(
     rng: PRNGKey,
     omap: Array,
@@ -361,7 +371,7 @@ def mcl_init(
 
 
 @partial(jax.jit, static_argnums=[2])
-@chex.assert_max_traces(n=2)
+@chex.assert_max_traces(n=1)
 def mcl_init_with_pose(
     rng: PRNGKey,
     pose: Array,
@@ -400,7 +410,7 @@ def mcl_init_with_pose(
 
 
 @partial(jax.jit, static_argnums=[11])
-@chex.assert_max_traces(n=2)
+@chex.assert_max_traces(n=1)
 def mcl_update(
     rng: PRNGKey,
     particles: Array,
@@ -537,6 +547,5 @@ def mcl_update(
     new_weights = new_weights / jnp.sum(new_weights)
 
     # 4. return new particle state and new weights and current estimate
-    # current_estimate = jnp.sum(jnp.multiply(proposal_particles, new_weights[:,None]), axis=0)
     current_estimate = jnp.dot(new_weights, proposal_particles)
     return proposal_particles, new_weights, current_estimate, rng
