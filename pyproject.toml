@@ -4,9 +4,8 @@ authors = [{ name = "Hongrui Zheng", email = "hongruiz@seas.upenn.edu" }]
 version = "0.1.0"
 requires-python = ">=3.10"
 dependencies = [
-    #"jax[cuda12]",
+    "jax[cuda12]",
     "chex==0.1.81",
-    #"distrax",
     "scipy"
     ]
 
