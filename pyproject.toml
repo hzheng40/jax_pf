@@ -1,18 +1,17 @@
-[project]
-name = "jax_pf"
-authors = [{ name = "Hongrui Zheng", email = "hongruiz@seas.upenn.edu" }]
+[tool.poetry]
+name = "jax-pf"
 version = "0.1.0"
-requires-python = ">=3.10"
-dependencies = [
-    #"jax[cuda12]",
-    "chex==0.1.81",
-    #"distrax",
-    "scipy"
-    ]
+description = ""
+authors = ["Hongrui Zheng <billyzheng.bz@gmail.com>"]
+license = "MIT"
+readme = "README.md"
 
-[project.optional-dependencies]
-test = ["pytest", "requests", "Pillow", "pyyaml", "matplotlib"]
+[tool.poetry.dependencies]
+python = "^3.10"
+jax = {extras = ["cuda12"], version = "^0.6.1"}
+chex = "^0.1.89"
+
 
 [build-system]
-requires = ["setuptools >= 61.0"]
-build-backend = "setuptools.build_meta"
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
