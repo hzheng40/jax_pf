@@ -329,7 +329,6 @@ def get_scan(
         stop=theta_index_start + theta_index_increment * num_beams,
         num=num_beams,
         endpoint=True,
-        dtype=int,
     )[:, None]
     # make sure it's wrapped properly
     theta_indices = jax.lax.select(
@@ -362,7 +361,7 @@ def get_scan(
     scan = trace_ray_vmap(
         pose[0],
         pose[1],
-        theta_indices,
+        theta_indices.astype(int),
         sines,
         cosines,
         eps,
