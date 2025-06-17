@@ -156,7 +156,7 @@ def motion_update(
     return particle_state, rng
 
 
-@partial(jax.jit, static_argnums=[5])
+@partial(jax.jit, static_argnums=[5, 9, 18])
 @chex.assert_max_traces(n=1)
 def sensor_update(
     particle_state: Array,
@@ -229,30 +229,27 @@ def sensor_update(
     """
 
     # 1. calculate scans of all particles
-    get_scan_vmapped = jax.jit(
-        jax.vmap(
-            get_scan,
-            in_axes=[
-                0,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-            ],
-        ),
-        static_argnums=[3],
+    get_scan_vmapped = jax.vmap(
+        get_scan,
+        in_axes=[
+            0,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ],
     )
     scans = get_scan_vmapped(
         particle_state,
@@ -279,8 +276,8 @@ def sensor_update(
     observation = observation / resolution
     scans = scans / resolution
     # clip scans by max range
-    observation = jnp.clip(observation, a_max=max_range_px)
-    scans = jnp.clip(scans, a_max=max_range_px)
+    observation = jnp.clip(observation, max=max_range_px)
+    scans = jnp.clip(scans, max=max_range_px)
 
     intobservation = jnp.rint(observation).astype(int)
     intscans = jnp.rint(scans).astype(int)
@@ -409,7 +406,7 @@ def mcl_init_with_pose(
     return particles, weights, rng
 
 
-@partial(jax.jit, static_argnums=[11])
+@partial(jax.jit, static_argnums=[11, 15, 24])
 @chex.assert_max_traces(n=1)
 def mcl_update(
     rng: PRNGKey,

@@ -159,8 +159,6 @@ def test_sensor_update(traj, dt):
     sensor_table = compute_sensor_model(
         z_short, z_max, z_rand, z_hit, sigma_hit, lambda_short, max_range_px
     )
-    sensor_table = jax.device_put(sensor_table, jax.devices()[0])
-    omap = jax.device_put(omap, jax.devices()[0])
 
     weights = sensor_update(
         particles,

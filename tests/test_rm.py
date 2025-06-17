@@ -65,8 +65,6 @@ def test_ray_trace(dt):
 
     xs = jnp.arange(2.5, 10.5, step=0.1)
     ys = jnp.arange(2.5, 10.5, step=0.1)
-    xs = jax.device_put(xs, jax.devices()[0])
-    ys = jax.device_put(ys, jax.devices()[0])
     theta_dis = 2000
     fov = 4.7
     num_beams = 1080
@@ -90,9 +88,7 @@ def test_ray_trace(dt):
     theta_arr = jnp.linspace(0.0, 2 * jnp.pi, num=theta_dis)
     sines = jnp.sin(theta_arr)
     cosines = jnp.cos(theta_arr)
-    sines = jax.device_put(sines, jax.devices()[0])
-    cosines = jax.device_put(cosines, jax.devices()[0])
-    omap = jax.device_put(dt.omap, jax.devices()[0])
+    omap = dt.omap
     eps = 0.01
     orig_x = dt.origin[0]
     orig_y = dt.origin[1]
@@ -167,14 +163,14 @@ def test_ray_trace(dt):
 
 def test_scan(dt, ref_scan):
     num_particles = 2000
-    pose = jnp.array([[-0.0440806, -0.8491629, 3.4034119]])
+    pose = jnp.array([[-0.0440806, -0.8491629, 3.4034119]], dtype=jnp.float32)
     rng = jax.random.PRNGKey(0)
     theta_dis = 2000
     fov = 4.7
     num_beams = 64
     angle_increment = fov / (num_beams - 1)
     theta_index_increment = theta_dis * angle_increment / (2 * jnp.pi)
-    theta_arr = jnp.linspace(0.0, 2 * jnp.pi, num=theta_dis)
+    theta_arr = jnp.linspace(0.0, 2 * jnp.pi, num=theta_dis, dtype=jnp.float32)
     sines = jnp.sin(theta_arr)
     cosines = jnp.cos(theta_arr)
     eps = 0.01
