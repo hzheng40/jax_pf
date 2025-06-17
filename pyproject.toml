@@ -8,9 +8,16 @@ readme = "README.md"
 
 [tool.poetry.dependencies]
 python = "^3.10"
-jax = {extras = ["cuda12"], version = "^0.6.1"}
+jax = {version = "0.4.34", extras = ["cuda12"]}
 chex = "^0.1.89"
 
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.4.0"
+requests = "^2.32.4"
+pyyaml = "^6.0.2"
+pillow = "^11.2.1"
+matplotlib = "^3.10.3"
 
 [build-system]
 requires = ["poetry-core"]

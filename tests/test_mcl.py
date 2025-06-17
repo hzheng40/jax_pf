@@ -13,6 +13,10 @@ from PIL import Image
 import tempfile
 import yaml
 
+import chex
+
+chex.disable_asserts()
+
 # jax.config.update("jax_enable_x64", True)
 
 Trajectory = namedtuple("Trajectory", ["poses", "scans", "actions"])
@@ -65,7 +69,9 @@ def test_sensor_table():
     sigma_hit = 8.0
     lambda_short = 0.03
     max_range_px = int(10 / 0.05796)  # Spielberg
-    table = compute_sensor_model(z_short, z_max, z_rand, z_hit, sigma_hit, lambda_short, max_range_px)
+    table = compute_sensor_model(
+        z_short, z_max, z_rand, z_hit, sigma_hit, lambda_short, max_range_px
+    )
 
     print(table.mean(), table.max(), table.min())
     import matplotlib.pyplot as plt
@@ -100,6 +106,7 @@ def test_motion_update():
     rng.block_until_ready()
     jax.profiler.stop_trace()
 
+
 def test_sensor_update(traj, dt):
     index = 10
     num_particles = 2000
@@ -112,7 +119,7 @@ def test_sensor_update(traj, dt):
     theta_dis = 2000
     fov = 4.7
     # num_beams = 99
-    
+
     theta_arr = jnp.linspace(0.0, 2 * jnp.pi, num=theta_dis)
     sines = jnp.sin(theta_arr)
     cosines = jnp.cos(theta_arr)
@@ -155,11 +162,51 @@ def test_sensor_update(traj, dt):
     sensor_table = jax.device_put(sensor_table, jax.devices()[0])
     omap = jax.device_put(omap, jax.devices()[0])
 
-    weights = sensor_update(particles, downsampled_scan, sensor_table, theta_dis, fov, num_beams, theta_index_increment, sines, cosines, eps, orig_x, orig_y, orig_c, orig_s, height, width, resolution, omap, max_range)
+    weights = sensor_update(
+        particles,
+        downsampled_scan,
+        sensor_table,
+        theta_dis,
+        fov,
+        num_beams,
+        theta_index_increment,
+        sines,
+        cosines,
+        eps,
+        orig_x,
+        orig_y,
+        orig_c,
+        orig_s,
+        height,
+        width,
+        resolution,
+        omap,
+        max_range,
+    )
 
     jax.profiler.start_trace("/tmp/tensorboard")
-    for _ in range(10): 
-        weights = sensor_update(particles, downsampled_scan, sensor_table, theta_dis, fov, num_beams, theta_index_increment, sines, cosines, eps, orig_x, orig_y, orig_c, orig_s, height, width, resolution, omap, max_range)
+    for _ in range(10):
+        weights = sensor_update(
+            particles,
+            downsampled_scan,
+            sensor_table,
+            theta_dis,
+            fov,
+            num_beams,
+            theta_index_increment,
+            sines,
+            cosines,
+            eps,
+            orig_x,
+            orig_y,
+            orig_c,
+            orig_s,
+            height,
+            width,
+            resolution,
+            omap,
+            max_range,
+        )
     weights.block_until_ready()
     jax.profiler.stop_trace()
 
@@ -198,7 +245,7 @@ def test_localization(traj, dt):
     motion_dispersion_y = 1.0
     motion_dispersion_t = 0.01
 
-    inv_squash_factor = 1/2.2
+    inv_squash_factor = 1 / 2.2
 
     lwb = 0.32
 
@@ -236,11 +283,9 @@ def test_localization(traj, dt):
             weights,
             action,
             downsampled_scan,
-            0.01,
             motion_dispersion_x,
             motion_dispersion_y,
             motion_dispersion_t,
-            lwb,
             sensor_table,
             theta_dis,
             fov,
@@ -258,27 +303,25 @@ def test_localization(traj, dt):
             resolution,
             omap,
             max_range,
-            inv_squash_factor,
         )
         all_pf_xs.append(particles[:, 0])
         all_pf_ys.append(particles[:, 1])
         all_pf_ts.append(particles[:, 2])
         est.append(current_estimate)
-    
-    
+
     all_pf_xs = np.array(all_pf_xs)
     all_pf_ys = np.array(all_pf_ys)
     all_pf_ts = np.array(all_pf_ts)
     est = np.array(est)
     print(est.shape)
-    
+
     import matplotlib.pyplot as plt
-    
+
     ax1 = plt.subplot(311)
     plt.plot(np.arange(all_pf_xs.shape[0]), all_pf_xs, alpha=0.1)
     plt.plot(np.arange(est.shape[0]), est[:, 0])
     plt.plot(np.arange(all_poses.shape[0]), all_poses[:, 0], linestyle="--")
-    
+
     # ax1.ti, alpha=0.2ll particle xs vs true x")
 
     # share x only
@@ -286,7 +329,7 @@ def test_localization(traj, dt):
     plt.plot(np.arange(all_pf_ys.shape[0]), all_pf_ys, alpha=0.1)
     plt.plot(np.arange(est.shape[0]), est[:, 1])
     plt.plot(np.arange(all_poses.shape[0]), all_poses[:, 1], linestyle="--")
-    
+
     # ax2.title("all particle ys vs true y")
 
     # share x and y
@@ -294,8 +337,7 @@ def test_localization(traj, dt):
     plt.plot(np.arange(all_pf_ts.shape[0]), all_pf_ts, alpha=0.1)
     plt.plot(np.arange(est.shape[0]), est[:, 2])
     plt.plot(np.arange(all_poses.shape[0]), all_poses[:, 2], linestyle="--")
-    
-    # ax3.title("all particle thetas vs true theta")
-    
-    plt.show()
 
+    # ax3.title("all particle thetas vs true theta")
+
+    plt.show()

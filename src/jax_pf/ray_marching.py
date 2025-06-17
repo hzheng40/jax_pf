@@ -339,26 +339,24 @@ def get_scan(
 
     # vmap to vectorize each ray march
     # vectorized over multiple theta_index inputs
-    trace_ray_vmap = jax.jit(
-        jax.vmap(
-            trace_ray,
-            (
-                None,
-                None,
-                0,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-            ),
+    trace_ray_vmap = jax.vmap(
+        trace_ray,
+        (
+            None,
+            None,
+            0,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
         ),
     )
     scan = trace_ray_vmap(

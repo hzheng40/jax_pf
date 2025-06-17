@@ -10,6 +10,9 @@ import yaml
 from collections import namedtuple
 from PIL import Image
 
+import chex
+chex.disable_asserts()
+
 MapInfo = namedtuple("MapInfo", ["omap", "resolution", "origin"])
 
 
@@ -51,7 +54,7 @@ def ref_scan():
 def test_ray_trace(dt):
     x = 6.5
     y = 10.2
-    pose = jnp.array([[6.5, 10.2, 0.0]])
+    pose = jnp.array([6.5, 10.2, 0.0])
     num_particles = 2000
     rng = jax.random.PRNGKey(0)
     rng, noise_rng = jax.random.split(rng, 2)
@@ -65,8 +68,25 @@ def test_ray_trace(dt):
     xs = jax.device_put(xs, jax.devices()[0])
     ys = jax.device_put(ys, jax.devices()[0])
     theta_dis = 2000
-    theta_indices = jnp.expand_dims(jnp.arange(theta_dis, dtype=int), 1)
-    theta_indices = jax.device_put(theta_indices, jax.devices()[0])
+    fov = 4.7
+    num_beams = 1080
+    angle_increment = fov / (num_beams - 1)
+    theta_index_increment = theta_dis * angle_increment / (2 * jnp.pi)
+
+    theta_index_start = theta_dis * (pose[2] - fov / 2.0) / (2.0 * jnp.pi)
+    theta_indices = jnp.linspace(
+        start=theta_index_start,
+        stop=theta_index_start + theta_index_increment * num_beams,
+        num=num_beams,
+        endpoint=True,
+        dtype=int,
+    )[:, None]
+    # make sure it's wrapped properly
+    theta_indices = jax.lax.select(
+        theta_indices < 0, theta_indices + theta_dis, theta_indices
+    )
+    theta_indices = jnp.fmod(theta_indices, theta_dis)
+
     theta_arr = jnp.linspace(0.0, 2 * jnp.pi, num=theta_dis)
     sines = jnp.sin(theta_arr)
     cosines = jnp.cos(theta_arr)
