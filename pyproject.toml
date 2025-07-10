@@ -1,24 +1,25 @@
-[tool.poetry]
+[project]
 name = "jax-pf"
 version = "0.1.0"
 description = ""
-authors = ["Hongrui Zheng <billyzheng.bz@gmail.com>"]
-license = "MIT"
+authors = [{ name = "Hongrui Zheng", email = "billyzheng.bz@gmail.com" }]
+requires-python = "~=3.10"
 readme = "README.md"
+license = "MIT"
+dependencies = [
+    "jax[cuda12]>=0.6.1,<0.7",
+    "chex>=0.1.89,<0.2",
+]
 
-[tool.poetry.dependencies]
-python = "^3.10"
-jax = {extras = ["cuda12"], version = "^0.6.1"}
-chex = "^0.1.89"
-
-
-[tool.poetry.group.dev.dependencies]
-pytest = "^8.4.0"
-requests = "^2.32.4"
-pyyaml = "^6.0.2"
-pillow = "^11.2.1"
-matplotlib = "^3.10.3"
+[dependency-groups]
+dev = [
+    "pytest>=8.4.0,<9",
+    "requests>=2.32.4,<3",
+    "pyyaml>=6.0.2,<7",
+    "pillow>=11.2.1,<12",
+    "matplotlib>=3.10.3,<4",
+]
 
 [build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
